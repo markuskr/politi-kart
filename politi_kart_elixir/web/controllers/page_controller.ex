@@ -15,97 +15,81 @@ defmodule PolitiKartElixir.PageController do
   end
   
   def address_tweets() do
+    hash_set = Enum.into(list_of_addresses(), HashSet.new)
     me = self
+    
     ExTwitter.user_timeline(screen_name: "oslopolitiops", count: 50)
+
     # Start X lightweight threads to work on the tweets in parallel
     |> Enum.map(fn(tweet) ->
-         spawn_link fn -> (send me, {self, location_to_tweet(tweet)}) end
+         spawn_link fn -> (send me, {self, location_to_tweet(tweet, hash_set)}) end
        end)
     |> Enum.map(fn (pid) ->
-         receive do { ^pid, result } -> result end
+         receive do {^pid, result} -> result end
        end)
     # Filter those where an address was found
-    |> Enum.filter(fn({status, _tweet, _address, _lat, _lng}) -> status == true end) 
-    |> Enum.map(fn({_status, tweet, address, lat, lng}) ->
-      %{:tweet => tweet.text, :posted => tweet.created_at, :address => address, :lat => lat, :lng => lng} end )
+    |> Enum.filter(fn({status, _tweet, _lat, _lng}) -> status == true end) 
+    |> Enum.map(fn({_status, tweet, lat, lng}) ->
+      %{:tweet => tweet.text, :posted => tweet.created_at, :lat => lat, :lng => lng}
+    end)
   end 
 
-  def location_to_tweet(tweet) do
-    tweet
-    |> address_from_tweet
-    |> location_to_address
+  def location_to_tweet(tweet, hash_set) do
+    splitted = String.split(tweet.text, [".", " ", ",", "/"])
+    {status, lat, lng}  = line_contains_address(splitted, hash_set)
+    |> address_to_location
+
+    {status, tweet, lat, lng}
   end
-  
-  def location_to_address({found, address, tweet}) do
+
+  def line_contains_address(line, hash_set) do
+    case line do
+      [_word | rest] ->
+        case address_list_contains(line, hash_set) do
+          {true, address} ->
+            {true, address}
+          _ ->
+            line_contains_address(rest, hash_set)
+        end
+      [] ->
+        {false, "no address"}  
+    end
+  end
+
+  def address_list_contains([], _hash_set) do
+    {false, "no address"}
+  end
+
+  def address_list_contains(list, hash_set) do
+    case HashSet.member?(hash_set, list) do
+      true -> {true, Enum.join(list, " ")}
+      _    -> address_list_contains(Enum.take(list, Enum.count(list) - 1), hash_set)
+    end
+  end
+
+  def address_to_location({found, address}) do
     case found do
       true -> 
         request = "https://maps.googleapis.com/maps/api/geocode/json?address=" <>
             URI.encode(address) <>
             ",+Oslo&key=" <>
             Application.get_env(:politi_kart_elixir, PolitiKartElixir.PageController)[:google_api_key]
-      
+
         google_maps_response = HTTPotion.get request
     
-        {_status, json} = JSON.decode(google_maps_response.body)
+        {status, json} = JSON.decode(google_maps_response.body)
+
         case json["results"] do
           [head | _rest] ->
-            {true, tweet, address, head["geometry"]["location"]["lat"], head["geometry"]["location"]["lng"]}
+            {true, head["geometry"]["location"]["lat"], head["geometry"]["location"]["lng"]}
           _ ->
-            {false, tweet, address, 0, 0}
+            Logger.debug(inspect status)
+            Logger.debug(inspect json)
+            {false, 0, 0}
         end
       _ ->
-        {false, tweet, address, 0, 0}
+        {false, 0, 0}
     end
-    
-  
-  end 
-  
-  def receive_address(line) do
-    case line do
-      [_word | rest]  ->
-        case is_in_address_list(line) do
-          {true, address} ->
-            {true, address}
-          _ ->
-            receive_address(rest)
-        end 
-      _ -> false             
-    end
-  end
-  
-  def address_from_tweet(tweet) do
-    case receive_address(String.split(tweet.text, [".", " ", ",", "/"])) do
-      {true, address} ->
-        {true, address, tweet}
-      _ ->
-        {false, "no match", tweet}
-    end
-  end 
-
-  def is_in_address_list(word) do
-    all_addresses =
-      Enum.map(list_of_addresses(),
-        fn(a) ->
-          array_contains(word, a)
-        end)
-    Enum.find(all_addresses, fn({f, _address}) -> f == true end)
-    
-  end
-
-  def array_contains(array, needle) do
-    case array do
-      [_head | rest] ->
-        zipped = Enum.zip(array, needle)
-
-        if (Enum.all?(zipped, fn({v, k}) -> v == k end)) do
-          {true, Enum.join(needle, " ")}
-        else
-          array_contains(rest, needle)
-        end 
-        
-      _ -> {false, "no match"}
-    end 
-    
   end
   
   def list_of_addresses() do
