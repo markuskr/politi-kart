@@ -22,7 +22,7 @@
     marker = new google.maps.Marker({
       position: new google.maps.LatLng(locations[i][1], locations[i][2]),
       map: map,
-      icon: 'https://pbs.twimg.com/profile_images/1563849121/pol_element_twitter_reasonably_small_mini.jpg'		  
+      icon: 'https://pbs.twimg.com/profile_images/1563849121/pol_element_twitter_reasonably_small_mini.jpg'               
     });
 
    google.maps.event.addListener(marker, 'click',

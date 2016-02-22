@@ -13,10 +13,10 @@ defmodule PolitiKartElixir.Router do
     plug :accepts, ["json"]
   end
 
-	scope "/",  PolitiKartElixir do
+  scope "/",  PolitiKartElixir do
     pipe_through :browser # Use the default browser stack
 
     get "/", PageController, :show
-	end 
+  end 
 
 end
